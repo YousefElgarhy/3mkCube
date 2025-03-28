@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Rubik's Cube</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: sans-serif;
+            background-color: #f0f0f0;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden; /* Prevent scrollbars from Three.js canvas */
+        }
+
+        #header {
+            width: 100%;
+            padding: 10px 0;
+            background-color: #4a90e2; /* Blue header */
+            color: white;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 15px; /* Space below header */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+             /* Fixed height for the header area including buttons */
+        }
+
+        #controls {
+            display: flex; /* Use flexbox for layout */
+            gap: 15px; /* Space between buttons */
+            align-items: center; /* Vertically center buttons */
+             padding: 0 20px; /* Padding around buttons */
+        }
+
+        #controls button {
+            padding: 8px 15px;
+            font-size: 14px;
+            cursor: pointer;
+            background-color: #ffffff; /* White buttons */
+            color: #4a90e2; /* Blue text */
+            border: 1px solid #4a90e2; /* Blue border */
+            border-radius: 5px;
+            transition: background-color 0.2s, color 0.2s, opacity 0.2s;
+        }
+
+        #controls button:hover {
+            background-color: #e0e0e0; /* Light gray on hover */
+        }
+
+         #controls button:active {
+             background-color: #d0d0d0;
+         }
+         #controls button:disabled {
+             opacity: 0.5;
+             cursor: not-allowed;
+             background-color: #e0e0e0;
+         }
+
+
+        #cube-container {
+            width: 80vw; /* Responsive width */
+            max-width: 600px; /* Max size */
+            height: 60vh; /* Responsive height */
+            max-height: 500px;
+            background-color: #e0e0e0; /* Light gray background for contrast */
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            margin-bottom: 15px; /* Space below cube */
+            position: relative; /* Needed for absolute positioning or overlays if any */
+            touch-action: none; /* Prevent default touch actions like scrolling */
+        }
+
+        #description {
+            max-width: 600px;
+            width: 80vw;
+            padding: 15px;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: center;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        /* Simple Modal for Reset Confirmation */
+        .modal-overlay {
+            display: none; /* Hidden by default */
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 20px 30px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .modal-content h3 {
+             margin-top: 0;
+             color: #d9534f; /* Red color like in video */
+        }
+        .modal-buttons button {
+             padding: 8px 20px;
+             margin: 0 10px;
+             border-radius: 5px;
+             cursor: pointer;
+             font-size: 14px;
+        }
+        #modal-cancel {
+             background-color: #f0f0f0;
+             border: 1px solid #ccc;
+        }
+         #modal-confirm {
+             background-color: #d9534f; /* Red */
+             color: white;
+             border: none;
+         }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+         <div id="controls">
+            <button id="reset-button" title="Reset Cube">🔄 Reset</button>
+            <button id="shuffle-button" title="Shuffle Cube">🔀 Shuffle</button>
+            <span>Drag cube faces to play!</span>
+        </div>
+    </div>
+
+    <div id="cube-container"></div>
+
+    <div id="description">
+        <p><strong>Rubik's Cube </stronge>
+        <p>Made with love by Yousef</p>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="reset-confirm-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>ARE YOU SURE?</h3>
+            <p>If you continue your current puzzle will be lost.</p>
+            <div class="modal-buttons">
+                <button id="modal-cancel">Cancel</button>
+                <button id="modal-confirm">Go!</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Include Three.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Include OrbitControls for camera movement -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        // --- Configuration ---
+        const CUBE_SIZE = 1;
+        const SPACING = 0.05; // Space between cubies
+        const N = 3; // 3x3x3 cube
+        const MOVE_DURATION = 200; // ms for animation
+        const SHUFFLE_MOVES = 25; // Number of moves for shuffle
+
+        // --- Colors ---
+        const COLORS = {
+            white:  0xffffff,
+            yellow: 0xffff00,
+            blue:   0x0000ff,
+            green:  0x00ff00,
+            red:    0xff0000,
+            orange: 0xffa500,
+            black:  0x1a1a1a // Inner color
+        };
+
+        // --- Global Variables ---
+        let scene, camera, renderer, controls;
+        let cubeGroup; // Group to hold all cubies
+        let cubies = []; // Array to store individual cubie meshes
+        let raycaster, mouse;
+        let intersectedObject = null;
+        let startPoint = null;
+        let dragNormal = null;
+        let isDragging = false;
+        let isAnimating = false; // Prevent actions during SINGLE move animation
+        let isSequenceAnimating = false; // Prevent actions during shuffle/reset SEQUENCE
+
+        const resetButton = document.getElementById('reset-button');
+        const shuffleButton = document.getElementById('shuffle-button');
+
+
+        // --- Initialization ---
+        function init() {
+            const container = document.getElementById('cube-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xe0e0e0);
+
+            const aspect = container.clientWidth / container.clientHeight;
+            camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
+            camera.position.set(5, 5, 7);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.1;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 5;
+            controls.maxDistance = 20;
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            createCube();
+
+            renderer.domElement.addEventListener('pointerdown', onPointerDown, false);
+            renderer.domElement.addEventListener('pointermove', onPointerMove, false);
+            renderer.domElement.addEventListener('pointerup', onPointerUp, false);
+            window.addEventListener('resize', onWindowResize, false);
+            resetButton.addEventListener('click', showResetConfirmation);
+            shuffleButton.addEventListener('click', shuffleCubeAnimated); // Changed handler
+
+            document.getElementById('modal-cancel').addEventListener('click', hideResetConfirmation);
+            document.getElementById('modal-confirm').addEventListener('click', () => {
+                hideResetConfirmation();
+                resetCubeAnimated(); // Changed handler
+            });
+
+            animate();
+        }
+
+        // --- Create Cube ---
+        function createCube() {
+            if (cubeGroup) {
+                scene.remove(cubeGroup);
+            }
+            cubeGroup = new THREE.Group();
+            cubies = [];
+            const offset = (N - 1) / 2;
+            const geometry = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
+
+            for (let x = 0; x < N; x++) {
+                for (let y = 0; y < N; y++) {
+                    for (let z = 0; z < N; z++) {
+                        if (x > 0 && x < N - 1 && y > 0 && y < N - 1 && z > 0 && z < N - 1) continue;
+
+                        const materials = [
+                            (x === N - 1) ? new THREE.MeshStandardMaterial({ color: COLORS.orange }) : new THREE.MeshStandardMaterial({ color: COLORS.black }), // R
+                            (x === 0)     ? new THREE.MeshStandardMaterial({ color: COLORS.red })   : new THREE.MeshStandardMaterial({ color: COLORS.black }), // L
+                            (y === N - 1) ? new THREE.MeshStandardMaterial({ color: COLORS.yellow }) : new THREE.MeshStandardMaterial({ color: COLORS.black }), // U
+                            (y === 0)     ? new THREE.MeshStandardMaterial({ color: COLORS.white })  : new THREE.MeshStandardMaterial({ color: COLORS.black }), // D
+                            (z === N - 1) ? new THREE.MeshStandardMaterial({ color: COLORS.blue })   : new THREE.MeshStandardMaterial({ color: COLORS.black }), // F
+                            (z === 0)     ? new THREE.MeshStandardMaterial({ color: COLORS.green })  : new THREE.MeshStandardMaterial({ color: COLORS.black })  // B
+                        ];
+
+                        const cubie = new THREE.Mesh(geometry, materials);
+                        cubie.position.set(
+                            (x - offset) * (CUBE_SIZE + SPACING),
+                            (y - offset) * (CUBE_SIZE + SPACING),
+                            (z - offset) * (CUBE_SIZE + SPACING)
+                        );
+                        cubie.userData.logicalPosition = new THREE.Vector3(x, y, z);
+                        // Store original position/rotation if needed for complex reset, but createCube is simpler
+                        // cubie.userData.originalPosition = cubie.position.clone();
+                        // cubie.userData.originalQuaternion = cubie.quaternion.clone();
+
+                        cubeGroup.add(cubie);
+                        cubies.push(cubie);
+                    }
+                }
+            }
+            scene.add(cubeGroup);
+        }
+
+        // --- Event Handlers ---
+        function getIntersect(event) {
+            const containerBounds = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - containerBounds.left) / containerBounds.width) * 2 - 1;
+            mouse.y = -((event.clientY - containerBounds.top) / containerBounds.height) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(cubies);
+
+            if (intersects.length > 0) {
+                const intersection = intersects[0];
+                // Ensure the intersected face is one of the colored faces, not an internal black face
+                const faceIndex = intersection.face.materialIndex;
+                if (intersection.object.material[faceIndex].color.getHex() !== COLORS.black) {
+                     return intersection;
+                }
+            }
+            return null;
+        }
+
+        function onPointerDown(event) {
+            if (isAnimating || isSequenceAnimating) return; // Ignore clicks during any animation
+
+            const intersect = getIntersect(event);
+            if (intersect) {
+                isDragging = true;
+                controls.enabled = false; // Disable camera control
+                intersectedObject = intersect.object;
+                startPoint = intersect.point.clone(); // World space intersection point
+                // Get the normal IN WORLD SPACE
+                dragNormal = intersect.face.normal.clone();
+                dragNormal.transformDirection(intersectedObject.matrixWorld).round(); // Crucial: transform to world and round
+            } else {
+                isDragging = false;
+                controls.enabled = true; // Allow camera control if not clicking cube face
+            }
+        }
+
+        function onPointerMove(event) {
+            // We don't strictly need to do anything complex on move,
+            // the calculation happens on pointer up based on start/end points.
+            // Could add visual feedback here if desired.
+        }
+
+        function onPointerUp(event) {
+             if (!isDragging || !startPoint || isAnimating || isSequenceAnimating) {
+                 controls.enabled = true; // Ensure controls re-enabled
+                 isDragging = false;
+                 return;
+             }
+
+             isDragging = false;
+             // Don't re-enable controls immediately, wait for potential animation to start/finish
+
+             // Calculate end point in world space is tricky if pointer is off cube.
+             // Instead, use the screen space drag vector relative to the start point.
+             const containerBounds = renderer.domElement.getBoundingClientRect();
+             const endMouse = new THREE.Vector2(
+                ((event.clientX - containerBounds.left) / containerBounds.width) * 2 - 1,
+               -((event.clientY - containerBounds.top) / containerBounds.height) * 2 + 1
+             );
+
+             const startPointScreen = startPoint.clone().project(camera);
+             const dragVectorScreen = endMouse.clone().sub(startPointScreen);
+
+             // Minimum drag distance threshold
+             if (dragVectorScreen.length() < 0.05) { // Reduced threshold slightly
+                 //console.log("Drag too short");
+                 controls.enabled = true; // Re-enable camera if drag was too short
+                 resetDragState();
+                 return;
+             }
+
+             const rotation = determineRotation(dragNormal, dragVectorScreen);
+             if (rotation) {
+                 //console.log("Rotate:", rotation.axis, rotation.layer, rotation.angle);
+                 rotateLayer(rotation.axis, rotation.layer, rotation.angle)
+                    .then(() => {
+                       controls.enabled = true; // Re-enable controls AFTER animation finishes
+                    })
+                    .catch(console.error);
+             } else {
+                 //console.log("Could not determine rotation");
+                 controls.enabled = true; // Re-enable if rotation couldn't be determined
+             }
+
+             resetDragState();
+        }
+
+        function resetDragState() {
+            intersectedObject = null;
+            startPoint = null;
+            dragNormal = null;
+            isDragging = false;
+        }
+
+
+        function onWindowResize() {
+            const container = document.getElementById('cube-container');
+            if (!container) return;
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // --- Rotation Logic ---
+
+        // *** REVISED determineRotation ***
+        function determineRotation(faceNormal, dragVectorScreen) {
+             const cameraDirection = new THREE.Vector3();
+             camera.getWorldDirection(cameraDirection);
+
+             // Calculate two potential axes ON the plane of the face
+             // Axis 1: Perpendicular to face normal and camera's up vector (approximates screen horizontal)
+             const rightAxis = new THREE.Vector3().crossVectors(camera.up, faceNormal).normalize();
+             // Axis 2: Perpendicular to face normal and the calculated rightAxis (approximates screen vertical)
+             const upAxis = new THREE.Vector3().crossVectors(faceNormal, rightAxis).normalize(); // Should align roughly with screen up/down on the face
+
+             // Project screen drag vector onto screen projections of these world axes
+             // Need to project world axes onto screen space
+             const originScreen = startPoint.clone().project(camera); // Project the click point
+             const rightAxisPointWorld = startPoint.clone().add(rightAxis);
+             const upAxisPointWorld = startPoint.clone().add(upAxis);
+
+             const rightAxisPointScreen = rightAxisPointWorld.project(camera);
+             const upAxisPointScreen = upAxisPointWorld.project(camera);
+
+             const rightAxisScreen = new THREE.Vector2().subVectors(rightAxisPointScreen, originScreen).normalize();
+             const upAxisScreen = new THREE.Vector2().subVectors(upAxisPointScreen, originScreen).normalize();
+
+
+             // Find which screen axis (right or up) the drag vector is more aligned with
+             const dotRight = dragVectorScreen.dot(rightAxisScreen);
+             const dotUp = dragVectorScreen.dot(upAxisScreen);
+
+             let rotationAxis = new THREE.Vector3();
+             let angleSign = 1;
+
+             // If drag is mostly along the 'rightAxisScreen' direction on the face
+             if (Math.abs(dotRight) > Math.abs(dotUp)) {
+                 // Rotation should be around the 'upAxis' (world space)
+                 rotationAxis.copy(upAxis);
+                 angleSign = Math.sign(dotRight); // Drag right (+) means clockwise (-angle), drag left (-) means counter-clockwise (+angle)
+             }
+             // If drag is mostly along the 'upAxisScreen' direction on the face
+             else {
+                 // Rotation should be around the 'rightAxis' (world space)
+                 rotationAxis.copy(rightAxis);
+                 angleSign = -Math.sign(dotUp); // Drag up (+) means clockwise (-angle), drag down (-) means counter-clockwise (+angle)
+             }
+
+             // Ensure rotationAxis is one of the main world axes (X, Y, Z)
+             // Find the largest component and zero out the others
+             let maxComp = Math.max(Math.abs(rotationAxis.x), Math.abs(rotationAxis.y), Math.abs(rotationAxis.z));
+             rotationAxis.x = (Math.abs(rotationAxis.x) / maxComp > 0.5) ? Math.sign(rotationAxis.x) : 0;
+             rotationAxis.y = (Math.abs(rotationAxis.y) / maxComp > 0.5) ? Math.sign(rotationAxis.y) : 0;
+             rotationAxis.z = (Math.abs(rotationAxis.z) / maxComp > 0.5) ? Math.sign(rotationAxis.z) : 0;
+
+             // If axis is zero (e.g., face normal parallel to camera view), cannot determine rotation
+             if (rotationAxis.lengthSq() < 0.5) {
+                 //console.warn("Could not determine valid rotation axis.");
+                 return null;
+             }
+
+             const angle = angleSign * Math.PI / 2; // 90 degrees
+
+             // Determine Layer based on clicked cubie and the ROTATION axis
+             const position = intersectedObject.userData.logicalPosition;
+             let layer = 0;
+             if (Math.abs(rotationAxis.x) > 0.5) layer = position.x; // Rotating around X axis -> layer is X coord
+             else if (Math.abs(rotationAxis.y) > 0.5) layer = position.y; // Rotating around Y axis -> layer is Y coord
+             else if (Math.abs(rotationAxis.z) > 0.5) layer = position.z; // Rotating around Z axis -> layer is Z coord
+
+             return {
+                 axis: rotationAxis,
+                 layer: layer,
+                 angle: angle
+             };
+         }
+
+
+        // *** MODIFIED rotateLayer to return a Promise ***
+        function rotateLayer(axis, layerIndex, angle) {
+            return new Promise((resolve, reject) => {
+                if (isAnimating) {
+                   // console.warn("Animation already in progress, ignoring turn.");
+                    reject("Animation in progress");
+                    return;
+                }
+                isAnimating = true;
+                controls.enabled = false; // Ensure disabled at start
+
+                const pivot = new THREE.Group();
+                scene.add(pivot);
+                const layerCubies = [];
+                const rotationMatrixLogical = new THREE.Matrix4().makeRotationAxis(axis, angle); // For logical position update
+
+                cubies.forEach(cubie => {
+                    const pos = cubie.userData.logicalPosition;
+                    let belongsToLayer = false;
+                    if (Math.abs(axis.x) > 0.5 && pos.x === layerIndex) belongsToLayer = true;
+                    else if (Math.abs(axis.y) > 0.5 && pos.y === layerIndex) belongsToLayer = true;
+                    else if (Math.abs(axis.z) > 0.5 && pos.z === layerIndex) belongsToLayer = true;
+
+                    if (belongsToLayer) {
+                        pivot.attach(cubie); // Preserves world transform
+                        layerCubies.push(cubie);
+                    }
+                });
+
+                 if (layerCubies.length === 0) {
+                     //console.warn("No cubies found for layer:", axis, layerIndex);
+                     isAnimating = false;
+                     controls.enabled = true;
+                     scene.remove(pivot);
+                     resolve(); // Resolve even if no cubies moved
+                     return;
+                 }
+
+
+                const startRotation = pivot.quaternion.clone();
+                const endRotation = new THREE.Quaternion().setFromAxisAngle(axis, angle).multiply(startRotation);
+                const startTime = performance.now();
+
+                function animateRotation() {
+                    const elapsedTime = performance.now() - startTime;
+                    const fraction = Math.min(elapsedTime / MOVE_DURATION, 1);
+                    const easedFraction = fraction * fraction * (3 - 2 * fraction); // Smoothstep
+                    pivot.quaternion.slerpQuaternions(startRotation, endRotation, easedFraction);
+
+                    if (fraction < 1) {
+                        requestAnimationFrame(animateRotation);
+                    } else {
+                        // --- Animation Finished ---
+                        pivot.quaternion.copy(endRotation); // Snap to final rotation
+
+                        layerCubies.forEach(cubie => {
+                            cubeGroup.attach(cubie); // Reattach to main group
+
+                            // Update logical position
+                            const logicalPos = cubie.userData.logicalPosition.clone();
+                            const offset = (N-1)/2;
+                            logicalPos.subScalar(offset);
+                            logicalPos.applyMatrix4(rotationMatrixLogical); // Rotate vector
+                            logicalPos.round();
+                            logicalPos.addScalar(offset);
+                            cubie.userData.logicalPosition.copy(logicalPos);
+                        });
+
+                        scene.remove(pivot); // Clean up pivot
+                        isAnimating = false;
+                        // DO NOT re-enable controls here if called from a sequence
+                        // controls.enabled = true;
+                        resolve(); // Resolve the promise indicating completion
+                    }
+                }
+                requestAnimationFrame(animateRotation);
+            });
+        }
+
+        // --- Control Functions ---
+
+        function setButtonsEnabled(enabled) {
+             resetButton.disabled = !enabled;
+             shuffleButton.disabled = !enabled;
+        }
+
+        // *** NEW: Animate a sequence of moves ***
+        async function applyMovesAnimated(moves) {
+            if (isSequenceAnimating) return; // Prevent starting new sequence
+            isSequenceAnimating = true;
+            setButtonsEnabled(false);
+            controls.enabled = false; // Disable camera panning during sequence
+
+            for (const move of moves) {
+                 try {
+                    await rotateLayer(move.axis, move.layerIndex, move.angle);
+                 } catch (error) {
+                     console.error("Error during move sequence:", error);
+                     break; // Stop sequence on error
+                 }
+            }
+
+            isSequenceAnimating = false;
+            setButtonsEnabled(true);
+            controls.enabled = true; // Re-enable camera panning
+            //console.log("Move sequence finished.");
+        }
+
+
+        function showResetConfirmation() {
+             if (isSequenceAnimating) return; // Don't show modal during animation
+             document.getElementById('reset-confirm-modal').style.display = 'flex';
+        }
+        function hideResetConfirmation() {
+             document.getElementById('reset-confirm-modal').style.display = 'none';
+        }
+
+        // *** MODIFIED: Animated Reset ***
+        async function resetCubeAnimated() {
+            if (isAnimating || isSequenceAnimating) return;
+            console.log("Resetting Cube Animated...");
+
+            // Simple visual animation: Rotate all layers sequentially
+            // This does NOT solve the cube, just provides animation before the final reset.
+            const resetMoves = [];
+            const axes = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+            const angle = Math.PI / 2; // Use a consistent angle for visual effect
+
+            for(const axis of axes) {
+                for (let i = 0; i < N; i++) {
+                    // Add a move (e.g., 90 degrees clockwise) - actual angle doesn't matter much
+                    // as the final createCube fixes it. We just need *some* moves.
+                    resetMoves.push({ axis: axis, layerIndex: i, angle: angle });
+                }
+            }
+
+            // Apply the visual animation
+            await applyMovesAnimated(resetMoves);
+
+            // Finally, ensure the cube is perfectly solved by recreating it
+            createCube();
+            console.log("Reset complete.");
+        }
+
+        // *** MODIFIED: Animated Shuffle ***
+        function shuffleCubeAnimated() {
+             if (isAnimating || isSequenceAnimating) return;
+             console.log("Shuffling Cube Animated...");
+
+             const moves = [];
+             const axes = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+             const angles = [Math.PI / 2, -Math.PI / 2];
+             let lastAxis = null; // Try to avoid consecutive moves on the same axis
+
+             for (let i = 0; i < SHUFFLE_MOVES; i++) {
+                 let axis;
+                 do {
+                    axis = axes[Math.floor(Math.random() * axes.length)];
+                 } while(axis === lastAxis); // Simple check to vary moves slightly
+
+                 const layerIndex = Math.floor(Math.random() * N); // 0, 1, or 2
+                 const angle = angles[Math.floor(Math.random() * angles.length)];
+                 moves.push({ axis, layerIndex, angle });
+                 lastAxis = axis;
+             }
+
+             // Apply the generated moves sequentially with animation
+             applyMovesAnimated(moves);
+        }
+
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Only update controls if no animations are running at all
+            if (!isAnimating && !isSequenceAnimating) {
+                 controls.update();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Start ---
+        init();
+
+    </script>
+
+</body>
+</html>
